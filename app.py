@@ -3,6 +3,9 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
 from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet
@@ -121,14 +124,104 @@ if st.button("🚀 Train and Predict", type="primary"):
             st.dataframe(df[['Open', 'High', 'Low', 'Close', 'Volume']].tail())
         
         with col2:
-            st.subheader("📊 Price Visualization")
-            fig, ax = plt.subplots(figsize=(10, 6))
-            ax.plot(df.index[-252:], df['Close'].iloc[-252:], label="Close Price")
-            ax.set_title(f"{stock} - Last Year Price Movement")
-            ax.set_xlabel("Date")
-            ax.set_ylabel("Price (₹)")
-            ax.legend()
-            st.pyplot(fig)
+            st.subheader("📊 Interactive Price Visualization")
+            
+            # Create interactive plotly chart
+            last_year_data = df.iloc[-252:] if len(df) >= 252 else df
+            
+            fig = make_subplots(
+                rows=2, cols=1,
+                subplot_titles=(f'{stock} - Price Movement', 'Volume'),
+                vertical_spacing=0.1,
+                row_heights=[0.7, 0.3],
+                shared_xaxes=True
+            )
+            
+            # Add candlestick chart
+            fig.add_trace(
+                go.Candlestick(
+                    x=last_year_data.index,
+                    open=last_year_data['Open'],
+                    high=last_year_data['High'],
+                    low=last_year_data['Low'],
+                    close=last_year_data['Close'],
+                    name="Price",
+                    increasing_line_color='green',
+                    decreasing_line_color='red'
+                ),
+                row=1, col=1
+            )
+            
+            # Add moving averages
+            if 'MA_20' in feature_df.columns:
+                fig.add_trace(
+                    go.Scatter(
+                        x=last_year_data.index,
+                        y=feature_df['MA_20'].iloc[-252:] if len(df) >= 252 else feature_df['MA_20'],
+                        mode='lines',
+                        name='MA-20',
+                        line=dict(color='blue', width=1)
+                    ),
+                    row=1, col=1
+                )
+            
+            if 'MA_50' in feature_df.columns:
+                fig.add_trace(
+                    go.Scatter(
+                        x=last_year_data.index,
+                        y=feature_df['MA_50'].iloc[-252:] if len(df) >= 252 else feature_df['MA_50'],
+                        mode='lines',
+                        name='MA-50',
+                        line=dict(color='orange', width=1)
+                    ),
+                    row=1, col=1
+                )
+            
+            # Add volume chart
+            colors = ['green' if close >= open else 'red' for close, open in 
+                     zip(last_year_data['Close'], last_year_data['Open'])]
+            
+            fig.add_trace(
+                go.Bar(
+                    x=last_year_data.index,
+                    y=last_year_data['Volume'],
+                    name="Volume",
+                    marker_color=colors,
+                    opacity=0.6
+                ),
+                row=2, col=1
+            )
+            
+            # Update layout
+            fig.update_layout(
+                title=f"{stock} - Interactive Price Chart",
+                yaxis_title="Price (₹)",
+                yaxis2_title="Volume",
+                xaxis_title="Date",
+                height=600,
+                showlegend=True,
+                hovermode='x unified',
+                xaxis_rangeslider_visible=False
+            )
+            
+            # Add range selector
+            fig.update_layout(
+                xaxis=dict(
+                    rangeselector=dict(
+                        buttons=list([
+                            dict(count=1, label="1M", step="month", stepmode="backward"),
+                            dict(count=3, label="3M", step="month", stepmode="backward"),
+                            dict(count=6, label="6M", step="month", stepmode="backward"),
+                            dict(count=1, label="1Y", step="year", stepmode="backward"),
+                            dict(step="all")
+                        ])
+                    ),
+                    rangeslider=dict(visible=False),
+                    type="date"
+                )
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
     
     # Feature engineering
     with st.spinner("🔧 Engineering features..."):
@@ -165,7 +258,19 @@ if st.button("🚀 Train and Predict", type="primary"):
         st.write(f"Top {len(top_features)} features selected:")
         if use_feature_selection:
             feature_importance = correlations[top_features].sort_values(ascending=False)
-            st.bar_chart(feature_importance[1:])  # Exclude Close itself
+            
+            # Create interactive bar chart for feature importance
+            fig = px.bar(
+                x=feature_importance[1:].values,  # Exclude Close itself
+                y=feature_importance[1:].index,
+                orientation='h',
+                title="Feature Correlation with Close Price",
+                labels={'x': 'Correlation Coefficient', 'y': 'Features'},
+                color=feature_importance[1:].values,
+                color_continuous_scale='viridis'
+            )
+            fig.update_layout(height=600, showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
     
     # Data preprocessing
     with st.spinner("⚙️ Preprocessing data..."):
@@ -241,12 +346,18 @@ if st.button("🚀 Train and Predict", type="primary"):
             'Importance': avg_importance
         }).sort_values('Importance', ascending=False)
         
-        fig, ax = plt.subplots(figsize=(10, 6))
-        ax.barh(importance_df['Feature'][:15], importance_df['Importance'][:15])
-        ax.set_title('Top 15 Feature Importance')
-        ax.set_xlabel('Importance')
-        plt.tight_layout()
-        st.pyplot(fig)
+        # Create interactive feature importance chart
+        fig = px.bar(
+            importance_df[:15],
+            x='Importance',
+            y='Feature',
+            orientation='h',
+            title='Top 15 Feature Importance (Random Forest)',
+            color='Importance',
+            color_continuous_scale='viridis'
+        )
+        fig.update_layout(height=600)
+        st.plotly_chart(fig, use_container_width=True)
     
     # Predictions and evaluation
     st.subheader("🔮 Model Predictions")
@@ -266,23 +377,54 @@ if st.button("🚀 Train and Predict", type="primary"):
             metrics_by_day[f'Day {day+1}'] = day_metrics
     
     # Visualize predictions
-    st.subheader("📈 Prediction vs Actual")
+    st.subheader("📈 Interactive Prediction vs Actual")
     
-    # Plot for each prediction day
-    fig, axes = plt.subplots(min(n_days, 3), 1, figsize=(12, 4*min(n_days, 3)))
-    if n_days == 1:
-        axes = [axes]
-    
+    # Create interactive prediction charts
     for i in range(min(n_days, 3)):
-        axes[i].plot(y_actual[:, i], label=f'Actual Day {i+1}', alpha=0.7)
-        axes[i].plot(y_pred[:, i], label=f'Predicted Day {i+1}', alpha=0.7)
-        axes[i].set_title(f'{stock} - Day {i+1} Prediction ({model_type})')
-        axes[i].set_xlabel('Test Samples')
-        axes[i].set_ylabel('Price (₹)')
-        axes[i].legend()
-    
-    plt.tight_layout()
-    st.pyplot(fig)
+        st.write(f"**Day {i+1} Prediction Results**")
+        
+        # Create subplot with actual vs predicted
+        fig = go.Figure()
+        
+        # Add actual values
+        fig.add_trace(
+            go.Scatter(
+                x=list(range(len(y_actual[:, i]))),
+                y=y_actual[:, i],
+                mode='lines+markers',
+                name=f'Actual Day {i+1}',
+                line=dict(color='blue', width=2),
+                marker=dict(size=4),
+                hovertemplate='Sample: %{x}<br>Actual Price: ₹%{y:.2f}<extra></extra>'
+            )
+        )
+        
+        # Add predicted values
+        fig.add_trace(
+            go.Scatter(
+                x=list(range(len(y_pred[:, i]))),
+                y=y_pred[:, i],
+                mode='lines+markers',
+                name=f'Predicted Day {i+1}',
+                line=dict(color='red', width=2, dash='dot'),
+                marker=dict(size=4),
+                hovertemplate='Sample: %{x}<br>Predicted Price: ₹%{y:.2f}<extra></extra>'
+            )
+        )
+        
+        # Calculate R² for this day
+        r2_day = r2_score(y_actual[:, i], y_pred[:, i])
+        
+        fig.update_layout(
+            title=f'{stock} - Day {i+1} Prediction ({model_type}) | R² = {r2_day:.4f}',
+            xaxis_title='Test Samples',
+            yaxis_title='Price (₹)',
+            hovermode='x unified',
+            height=400,
+            showlegend=True
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
     
     # Metrics display
     st.subheader("📏 Model Performance Metrics")
@@ -306,8 +448,8 @@ if st.button("🚀 Train and Predict", type="primary"):
         accuracy = max(0, 100 - overall_mape)
         st.metric("Prediction Accuracy", f"{accuracy:.1f}%")
     
-    # Future prediction
-    st.subheader("🔮 Future Price Prediction")
+    # Future prediction with interactive chart
+    st.subheader("🔮 Interactive Future Price Prediction")
     
     # Use the last sample to predict future prices
     last_sample = X_scaled[-1:] if len(X_scaled) > 0 else X_scaled[-1].reshape(1, -1)
@@ -316,17 +458,87 @@ if st.button("🚀 Train and Predict", type="primary"):
     
     current_price = y.iloc[-1]
     
+    # Create interactive future prediction chart
+    dates = pd.date_range(start=df.index[-1] + pd.Timedelta(days=1), periods=n_days, freq='D')
+    
+    fig = go.Figure()
+    
+    # Add historical prices (last 30 days)
+    historical_data = df.tail(30)
+    fig.add_trace(
+        go.Scatter(
+            x=historical_data.index,
+            y=historical_data['Close'],
+            mode='lines+markers',
+            name='Historical Prices',
+            line=dict(color='blue', width=2),
+            marker=dict(size=4)
+        )
+    )
+    
+    # Add current price point
+    fig.add_trace(
+        go.Scatter(
+            x=[df.index[-1]],
+            y=[current_price],
+            mode='markers',
+            name='Current Price',
+            marker=dict(size=10, color='green', symbol='diamond')
+        )
+    )
+    
+    # Add predicted prices
+    fig.add_trace(
+        go.Scatter(
+            x=dates,
+            y=future_pred,
+            mode='lines+markers',
+            name='Predicted Prices',
+            line=dict(color='red', width=2, dash='dot'),
+            marker=dict(size=6),
+            hovertemplate='Date: %{x}<br>Predicted Price: ₹%{y:.2f}<extra></extra>'
+        )
+    )
+    
+    # Add connecting line
+    fig.add_trace(
+        go.Scatter(
+            x=[df.index[-1], dates[0]],
+            y=[current_price, future_pred[0]],
+            mode='lines',
+            name='Transition',
+            line=dict(color='gray', width=1, dash='dash'),
+            showlegend=False
+        )
+    )
+    
+    fig.update_layout(
+        title=f'{stock} - Future Price Prediction ({model_type})',
+        xaxis_title='Date',
+        yaxis_title='Price (₹)',
+        hovermode='x unified',
+        height=500,
+        showlegend=True
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
     st.write("🎯 **Next Few Days Prediction:**")
-    for i, price in enumerate(future_pred):
+    
+    # Create a summary table
+    prediction_data = []
+    for i, (date, price) in enumerate(zip(dates, future_pred)):
         change = ((price - current_price) / current_price) * 100
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.write(f"Day {i+1}:")
-        with col2:
-            st.write(f"₹{price:.2f}")
-        with col3:
-            color = "🟢" if change > 0 else "🔴" if change < 0 else "🟡"
-            st.write(f"{color} {change:+.2f}%")
+        prediction_data.append({
+            'Day': f'Day {i+1}',
+            'Date': date.strftime('%Y-%m-%d'),
+            'Predicted Price': f'₹{price:.2f}',
+            'Change': f'{change:+.2f}%',
+            'Trend': '🟢 Up' if change > 0 else '🔴 Down' if change < 0 else '🟡 Flat'
+        })
+    
+    prediction_df = pd.DataFrame(prediction_data)
+    st.dataframe(prediction_df, use_container_width=True)
     
     # Model coefficients (for linear models)
     if model_type in ['Linear Regression', 'Ridge Regression', 'Lasso Regression', 'ElasticNet']:
