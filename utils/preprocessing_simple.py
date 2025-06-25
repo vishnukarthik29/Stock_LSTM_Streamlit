@@ -146,21 +146,6 @@ def prepare_features(df, target_col='Close'):
     
     return feature_df
 
-# def remove_highly_correlated_features(df, threshold=0.95, preserve_cols=['Close']):
-#     """Remove highly correlated features while preserving important columns"""
-#     corr_matrix = df.corr().abs()
-#     upper_tri = corr_matrix.where(
-#         np.triu(np.ones(corr_matrix.shape), k=1).astype(bool)
-#     )
-    
-#     to_drop = []
-#     for column in upper_tri.columns:
-#         if column in preserve_cols:
-#             continue
-#         if any(upper_tri[column] > threshold):
-#             to_drop.append(column)
-    
-#     return df.drop(columns=to_drop)
 
 def remove_highly_correlated_features(df, threshold=0.95, preserve_cols=['Close']):
     """Remove highly correlated features while preserving important columns"""

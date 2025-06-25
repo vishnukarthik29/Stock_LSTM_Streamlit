@@ -11,10 +11,10 @@
 
 # print(df.shape)
 # print(df[['Close']].tail())  # Display last 5 closing prices
-# import yfinance as yf
-# print(yf.download("TCS.NS", period="1y").head())
-# df = yf.download("TCS.BO", period="5y", interval="1d")
-# df = yf.download("AAPL", period="5y", interval="1d")
+import yfinance as yf
+print(yf.download("TCS.NS", period="1y").head())
+df = yf.download("TCS.BO", period="5y", interval="1d")
+df = yf.download("AAPL", period="5y", interval="1d")
 # import yfinance as yf
 
 # tickers = ["AAPL", "TCS.NS", "RELIANCE.NS"]
@@ -30,20 +30,20 @@
 #             print(df.tail())
 #     except Exception as e:
 #         print(f"❌ Error for {ticker} -> {e}")
-from alpha_vantage.timeseries import TimeSeries
-import pandas as pd
+# from alpha_vantage.timeseries import TimeSeries
+# import pandas as pd
 
-api_key = '70CILADGUDA5YE75'  # <-- paste your API key here
-ts = TimeSeries(key=api_key, output_format='pandas')
+# api_key = '70CILADGUDA5YE75'  # <-- paste your API key here
+# ts = TimeSeries(key=api_key, output_format='pandas')
 
-symbols = ['RELIANCE.BSE', 'TCS.BSE']  # For Indian stocks
+# symbols = ['RELIANCE.BSE', 'TCS.BSE']  # For Indian stocks
 
-for symbol in symbols:
-    print(f"\n🔍 Fetching: {symbol}")
-    try:
-        data, meta = ts.get_daily(symbol=symbol, outputsize='compact')
-        print("✅ Data fetched successfully!")
-        print(data.tail())
-    except Exception as e:
-        print(f"❌ Failed to fetch data: {e}")
+# for symbol in symbols:
+#     print(f"\n🔍 Fetching: {symbol}")
+#     try:
+#         data, meta = ts.get_daily(symbol=symbol, outputsize='compact')
+#         print("✅ Data fetched successfully!")
+#         print(data.tail())
+#     except Exception as e:
+#         print(f"❌ Failed to fetch data: {e}")
 

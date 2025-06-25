@@ -5,85 +5,82 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.model_selection import TimeSeriesSplit
+from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from keras.models import Sequential
-from keras.layers import Dense, LSTM, Dropout, BatchNormalization, Bidirectional
-from keras.optimizers import Adam
-from keras.callbacks import EarlyStopping, ReduceLROnPlateau
-from keras.regularizers import l2
+from sklearn.feature_selection import SelectKBest, f_regression
 from utils.preprocessing_simple import load_data, prepare_features
 import datetime
 import warnings
 warnings.filterwarnings('ignore')
 
 # Page config
-st.set_page_config(page_title="📈 Advanced Stock Price Prediction", layout="wide")
-st.title("📊 Advanced Stock Price Prediction using Enhanced LSTM")
+st.set_page_config(page_title="📈 Linear Regression Stock Price Prediction", layout="wide")
+st.title("📊 Stock Price Prediction using Linear Regression")
 
 # Sidebar
 st.sidebar.header("🔧 Model Configuration")
 stock = st.sidebar.selectbox("Select Stock", ['RELIANCE.BSE', 'TCS.BSE', 'INFY.BSE', 'WIPRO.BSE'])
 n_days = st.sidebar.slider("Prediction Horizon (days)", min_value=1, max_value=30, value=5)
-sequence_length = st.sidebar.slider("Sequence Length", min_value=30, max_value=120, value=60)
 n_features = st.sidebar.slider("Number of Features", min_value=5, max_value=50, value=20)
+
+# Model selection
+st.sidebar.subheader("🤖 Model Selection")
+model_type = st.sidebar.selectbox(
+    "Choose Regression Model", 
+    ['Linear Regression', 'Ridge Regression', 'Lasso Regression', 'ElasticNet', 'Random Forest']
+)
 
 # Advanced options
 st.sidebar.subheader("🧠 Advanced Options")
-epochs = st.sidebar.slider("Training Epochs", min_value=20, max_value=200, value=100)
-batch_size = st.sidebar.selectbox("Batch Size", [16, 32, 64, 128], index=1)
-lstm_units = st.sidebar.slider("LSTM Units", min_value=32, max_value=256, value=100)
-dropout_rate = st.sidebar.slider("Dropout Rate", min_value=0.0, max_value=0.5, value=0.2)
-use_bidirectional = st.sidebar.checkbox("Use Bidirectional LSTM", value=True)
+if model_type in ['Ridge Regression', 'Lasso Regression', 'ElasticNet']:
+    alpha = st.sidebar.slider("Regularization Strength (Alpha)", min_value=0.01, max_value=10.0, value=1.0, step=0.01)
+    if model_type == 'ElasticNet':
+        l1_ratio = st.sidebar.slider("L1 Ratio", min_value=0.0, max_value=1.0, value=0.5, step=0.01)
 
-def create_sequences(data, target, sequence_length, n_days):
-    """Create sequences for multi-step prediction"""
-    X, y = [], []
-    for i in range(sequence_length, len(data) - n_days + 1):
-        X.append(data[i-sequence_length:i])
-        y.append(target[i:i+n_days])
-    return np.array(X), np.array(y)
+if model_type == 'Random Forest':
+    n_estimators = st.sidebar.slider("Number of Trees", min_value=50, max_value=500, value=100)
+    max_depth = st.sidebar.slider("Max Depth", min_value=3, max_value=20, value=10)
 
-def build_enhanced_model(input_shape, n_days, lstm_units, dropout_rate, use_bidirectional):
-    """Build enhanced LSTM model with regularization"""
-    model = Sequential()
+# Feature engineering options
+use_feature_selection = st.sidebar.checkbox("Use Feature Selection", value=True)
+use_lagged_features = st.sidebar.checkbox("Add Lagged Features", value=True)
+lag_periods = st.sidebar.multiselect("Lag Periods", [1, 2, 3, 5, 10], default=[1, 2, 3])
+
+def create_lagged_features(df, target_col='Close', lag_periods=[1, 2, 3]):
+    """Create lagged features for time series prediction"""
+    df_lagged = df.copy()
     
-    if use_bidirectional:
-        model.add(Bidirectional(LSTM(units=lstm_units, return_sequences=True, 
-                                   kernel_regularizer=l2(0.001)), 
-                              input_shape=input_shape))
-    else:
-        model.add(LSTM(units=lstm_units, return_sequences=True, 
-                      kernel_regularizer=l2(0.001), input_shape=input_shape))
+    for lag in lag_periods:
+        df_lagged[f'{target_col}_lag_{lag}'] = df[target_col].shift(lag)
+        df_lagged[f'{target_col}_diff_{lag}'] = df[target_col].diff(lag)
+        df_lagged[f'{target_col}_pct_change_{lag}'] = df[target_col].pct_change(lag)
     
-    model.add(Dropout(dropout_rate))
-    model.add(BatchNormalization())
-    
-    if use_bidirectional:
-        model.add(Bidirectional(LSTM(units=lstm_units//2, return_sequences=True,
-                                   kernel_regularizer=l2(0.001))))
-    else:
-        model.add(LSTM(units=lstm_units//2, return_sequences=True,
-                      kernel_regularizer=l2(0.001)))
-    
-    model.add(Dropout(dropout_rate))
-    model.add(BatchNormalization())
-    
-    if use_bidirectional:
-        model.add(Bidirectional(LSTM(units=lstm_units//4, kernel_regularizer=l2(0.001))))
-    else:
-        model.add(LSTM(units=lstm_units//4, kernel_regularizer=l2(0.001)))
-    
-    model.add(Dropout(dropout_rate))
-    model.add(Dense(units=64, activation='relu', kernel_regularizer=l2(0.001)))
-    model.add(Dropout(dropout_rate/2))
-    model.add(Dense(units=32, activation='relu', kernel_regularizer=l2(0.001)))
-    model.add(Dense(units=n_days))
-    
-    model.compile(optimizer=Adam(learning_rate=0.001), 
-                 loss='huber', 
-                 metrics=['mae'])
-    
-    return model
+    return df_lagged
+
+def create_target_sequences(target, n_days):
+    """Create multi-step prediction targets"""
+    targets = []
+    for i in range(len(target) - n_days + 1):
+        targets.append(target[i:i+n_days])
+    return np.array(targets)
+
+def get_model(model_type, **kwargs):
+    """Get the selected regression model"""
+    if model_type == 'Linear Regression':
+        return LinearRegression()
+    elif model_type == 'Ridge Regression':
+        return Ridge(alpha=kwargs.get('alpha', 1.0))
+    elif model_type == 'Lasso Regression':
+        return Lasso(alpha=kwargs.get('alpha', 1.0))
+    elif model_type == 'ElasticNet':
+        return ElasticNet(alpha=kwargs.get('alpha', 1.0), l1_ratio=kwargs.get('l1_ratio', 0.5))
+    elif model_type == 'Random Forest':
+        return RandomForestRegressor(
+            n_estimators=kwargs.get('n_estimators', 100),
+            max_depth=kwargs.get('max_depth', 10),
+            random_state=42
+        )
 
 def calculate_metrics(y_true, y_pred):
     """Calculate comprehensive evaluation metrics"""
@@ -91,7 +88,9 @@ def calculate_metrics(y_true, y_pred):
     mae = mean_absolute_error(y_true, y_pred)
     rmse = np.sqrt(mse)
     r2 = r2_score(y_true, y_pred)
-    mape = np.mean(np.abs((y_true - y_pred) / y_true)) * 100
+    
+    # Handle division by zero for MAPE
+    mape = np.mean(np.abs((y_true - y_pred) / np.where(y_true != 0, y_true, 1e-8))) * 100
     
     return {
         'MSE': mse,
@@ -131,16 +130,30 @@ if st.button("🚀 Train and Predict", type="primary"):
             ax.legend()
             st.pyplot(fig)
     
-    # Feature selection and preparation
-    with st.spinner("🔧 Preparing features..."):
+    # Feature engineering
+    with st.spinner("🔧 Engineering features..."):
+        # Add lagged features if selected
+        if use_lagged_features and lag_periods:
+            feature_df = create_lagged_features(feature_df, 'Close', lag_periods)
+            st.write(f"✅ Added lagged features for periods: {lag_periods}")
+        
         # Ensure Close column exists
         if 'Close' not in feature_df.columns:
             st.error("❌ 'Close' column not found in feature data. Please check data preprocessing.")
             st.stop()
         
-        # Select top features based on correlation with target
-        correlations = feature_df.corr()['Close'].abs().sort_values(ascending=False)
-        top_features = correlations.head(n_features).index.tolist()
+        # Remove rows with NaN values (created by lagging)
+        feature_df = feature_df.dropna()
+        
+        # Feature selection
+        if use_feature_selection:
+            # Select top features based on correlation with target
+            correlations = feature_df.corr()['Close'].abs().sort_values(ascending=False)
+            top_features = correlations.head(n_features).index.tolist()
+        else:
+            # Use all available features except Close
+            top_features = [col for col in feature_df.columns if col != 'Close'][:n_features]
+            top_features.append('Close')
         
         # Ensure Close is included
         if 'Close' not in top_features:
@@ -150,113 +163,101 @@ if st.button("🚀 Train and Predict", type="primary"):
         
         st.subheader("🎯 Selected Features")
         st.write(f"Top {len(top_features)} features selected:")
-        feature_importance = correlations[top_features].sort_values(ascending=False)
-        st.bar_chart(feature_importance[1:])  # Exclude Close itself
+        if use_feature_selection:
+            feature_importance = correlations[top_features].sort_values(ascending=False)
+            st.bar_chart(feature_importance[1:])  # Exclude Close itself
     
     # Data preprocessing
     with st.spinner("⚙️ Preprocessing data..."):
+        # Separate features and target
+        X = selected_features.drop('Close', axis=1)
+        y = selected_features['Close']
+        
+        # Create multi-step targets
+        y_sequences = create_target_sequences(y.values, n_days)
+        
+        # Align X with y_sequences (remove last n_days-1 rows from X)
+        X_aligned = X.iloc[:len(y_sequences)]
+        
         # Use RobustScaler for better handling of outliers
         feature_scaler = RobustScaler()
         target_scaler = RobustScaler()
         
         # Scale features
-        scaled_features = feature_scaler.fit_transform(selected_features)
-        scaled_target = target_scaler.fit_transform(df[['Close']])
+        X_scaled = feature_scaler.fit_transform(X_aligned)
+        y_scaled = target_scaler.fit_transform(y_sequences)
         
-        # Create sequences
-        X, y = create_sequences(scaled_features, scaled_target.flatten(), sequence_length, n_days)
-        
-        st.write(f"✅ Created {len(X)} sequences")
-        st.write(f"✅ Feature matrix shape: {X.shape}")
-        st.write(f"✅ Target matrix shape: {y.shape}")
+        st.write(f"✅ Feature matrix shape: {X_scaled.shape}")
+        st.write(f"✅ Target matrix shape: {y_scaled.shape}")
     
     # Train-test split (time series aware)
     split_ratio = 0.8
-    split_index = int(len(X) * split_ratio)
+    split_index = int(len(X_scaled) * split_ratio)
     
-    X_train, X_test = X[:split_index], X[split_index:]
-    y_train, y_test = y[:split_index], y[split_index:]
+    X_train, X_test = X_scaled[:split_index], X_scaled[split_index:]
+    y_train, y_test = y_scaled[:split_index], y_scaled[split_index:]
     
-    # Build and train model
-    st.subheader("🧠 Training Enhanced LSTM Model")
+    # Model training
+    st.subheader(f"🤖 Training {model_type} Model")
     
-    with st.spinner("🏗️ Building model architecture..."):
-        model = build_enhanced_model(
-            input_shape=(X_train.shape[1], X_train.shape[2]),
-            n_days=n_days,
-            lstm_units=lstm_units,
-            dropout_rate=dropout_rate,
-            use_bidirectional=use_bidirectional
-        )
+    with st.spinner("🏗️ Training models..."):
+        models = {}
+        predictions = {}
         
-        st.write("📋 Model Architecture:")
-        st.text(f"Input Shape: {X_train.shape[1:2]}")
-        st.text(f"LSTM Units: {lstm_units}")
-        st.text(f"Bidirectional: {use_bidirectional}")
-        st.text(f"Dropout Rate: {dropout_rate}")
-    
-    # Callbacks for better training
-    callbacks = [
-        EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True),
-        ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=8, min_lr=1e-7)
-    ]
-    
-    # Training
-    with st.spinner(f"🎯 Training model for {epochs} epochs..."):
-        progress_bar = st.progress(0)
+        # Train separate models for each prediction day
+        for day in range(n_days):
+            # Get model parameters
+            model_params = {}
+            if model_type in ['Ridge Regression', 'Lasso Regression', 'ElasticNet']:
+                model_params['alpha'] = alpha
+                if model_type == 'ElasticNet':
+                    model_params['l1_ratio'] = l1_ratio
+            elif model_type == 'Random Forest':
+                model_params['n_estimators'] = n_estimators
+                model_params['max_depth'] = max_depth
+            
+            # Create and train model
+            model = get_model(model_type, **model_params)
+            model.fit(X_train, y_train[:, day])
+            
+            # Make predictions
+            pred = model.predict(X_test)
+            
+            models[f'Day_{day+1}'] = model
+            predictions[f'Day_{day+1}'] = pred
         
-        class ProgressCallback:
-            def __init__(self, progress_bar):
-                self.progress_bar = progress_bar
-                
-            def on_epoch_end(self, epoch, logs=None):
-                progress = (epoch + 1) / epochs
-                self.progress_bar.progress(progress)
-        
-        # Custom callback for progress
-        progress_callback = ProgressCallback(progress_bar)
-        
-        history = model.fit(
-            X_train, y_train,
-            epochs=epochs,
-            batch_size=batch_size,
-            validation_split=0.2,
-            callbacks=callbacks,
-            verbose=0
-        )
+        st.write(f"✅ Trained {n_days} {model_type} models")
     
-    # Training history visualization
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("📉 Training Loss")
-        fig, ax = plt.subplots()
-        ax.plot(history.history['loss'], label='Training Loss')
-        ax.plot(history.history['val_loss'], label='Validation Loss')
-        ax.set_xlabel('Epoch')
-        ax.set_ylabel('Loss')
-        ax.legend()
+    # Feature importance (for applicable models)
+    if model_type == 'Random Forest':
+        st.subheader("🎯 Feature Importance")
+        feature_names = X.columns
+        
+        # Average feature importance across all day models
+        avg_importance = np.mean([models[f'Day_{day+1}'].feature_importances_ for day in range(n_days)], axis=0)
+        
+        importance_df = pd.DataFrame({
+            'Feature': feature_names,
+            'Importance': avg_importance
+        }).sort_values('Importance', ascending=False)
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.barh(importance_df['Feature'][:15], importance_df['Importance'][:15])
+        ax.set_title('Top 15 Feature Importance')
+        ax.set_xlabel('Importance')
+        plt.tight_layout()
         st.pyplot(fig)
     
-    with col2:
-        st.subheader("📊 Training MAE")
-        fig, ax = plt.subplots()
-        ax.plot(history.history['mae'], label='Training MAE')
-        ax.plot(history.history['val_mae'], label='Validation MAE')
-        ax.set_xlabel('Epoch')
-        ax.set_ylabel('MAE')
-        ax.legend()
-        st.pyplot(fig)
-    
-    # Predictions
+    # Predictions and evaluation
     st.subheader("🔮 Model Predictions")
     
     with st.spinner("📊 Generating predictions..."):
-        # Predict on test set
-        y_pred_scaled = model.predict(X_test)
+        # Combine predictions
+        y_pred_scaled = np.column_stack([predictions[f'Day_{day+1}'] for day in range(n_days)])
         
         # Transform back to original scale
         y_pred = target_scaler.inverse_transform(y_pred_scaled)
-        y_actual = target_scaler.inverse_transform(y_test.reshape(-1, n_days))
+        y_actual = target_scaler.inverse_transform(y_test)
         
         # Calculate metrics for each prediction day
         metrics_by_day = {}
@@ -275,7 +276,7 @@ if st.button("🚀 Train and Predict", type="primary"):
     for i in range(min(n_days, 3)):
         axes[i].plot(y_actual[:, i], label=f'Actual Day {i+1}', alpha=0.7)
         axes[i].plot(y_pred[:, i], label=f'Predicted Day {i+1}', alpha=0.7)
-        axes[i].set_title(f'{stock} - Day {i+1} Prediction')
+        axes[i].set_title(f'{stock} - Day {i+1} Prediction ({model_type})')
         axes[i].set_xlabel('Test Samples')
         axes[i].set_ylabel('Price (₹)')
         axes[i].legend()
@@ -292,25 +293,28 @@ if st.button("🚀 Train and Predict", type="primary"):
     # Overall performance
     overall_mape = np.mean([metrics_by_day[day]['MAPE'] for day in metrics_by_day.keys()])
     overall_r2 = np.mean([metrics_by_day[day]['R²'] for day in metrics_by_day.keys()])
+    overall_rmse = np.mean([metrics_by_day[day]['RMSE'] for day in metrics_by_day.keys()])
     
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("Overall MAPE", f"{overall_mape:.2f}%")
     with col2:
         st.metric("Overall R² Score", f"{overall_r2:.4f}")
     with col3:
+        st.metric("Overall RMSE", f"{overall_rmse:.2f}")
+    with col4:
         accuracy = max(0, 100 - overall_mape)
         st.metric("Prediction Accuracy", f"{accuracy:.1f}%")
     
     # Future prediction
     st.subheader("🔮 Future Price Prediction")
     
-    # Use the last sequence to predict future prices
-    last_sequence = scaled_features[-sequence_length:].reshape(1, sequence_length, X.shape[2])
-    future_pred_scaled = model.predict(last_sequence)
-    future_pred = target_scaler.inverse_transform(future_pred_scaled)[0]
+    # Use the last sample to predict future prices
+    last_sample = X_scaled[-1:] if len(X_scaled) > 0 else X_scaled[-1].reshape(1, -1)
+    future_pred_scaled = np.array([models[f'Day_{day+1}'].predict(last_sample)[0] for day in range(n_days)])
+    future_pred = target_scaler.inverse_transform(future_pred_scaled.reshape(1, -1))[0]
     
-    current_price = df['Close'].iloc[-1]
+    current_price = y.iloc[-1]
     
     st.write("🎯 **Next Few Days Prediction:**")
     for i, price in enumerate(future_pred):
@@ -323,6 +327,19 @@ if st.button("🚀 Train and Predict", type="primary"):
         with col3:
             color = "🟢" if change > 0 else "🔴" if change < 0 else "🟡"
             st.write(f"{color} {change:+.2f}%")
+    
+    # Model coefficients (for linear models)
+    if model_type in ['Linear Regression', 'Ridge Regression', 'Lasso Regression', 'ElasticNet']:
+        st.subheader("📊 Model Coefficients")
+        
+        # Show coefficients for Day 1 model as example
+        coefficients = models['Day_1'].coef_
+        coef_df = pd.DataFrame({
+            'Feature': X.columns,
+            'Coefficient': coefficients
+        }).sort_values('Coefficient', key=abs, ascending=False)
+        
+        st.dataframe(coef_df.round(6))
     
     # Insights and recommendations
     st.subheader("💡 AI Insights & Recommendations")
@@ -341,6 +358,7 @@ if st.button("🚀 Train and Predict", type="primary"):
         confidence_level = "Low"
         confidence_color = "🔴"
     
+    st.write(f"**Model Used:** {model_type}")
     st.write(f"**Trend Analysis:** The model predicts a {trend} trend over the next {n_days} days.")
     st.write(f"**Confidence Level:** {confidence_color} {confidence_level} ({confidence:.1f}%)")
     st.write(f"**Model Performance:** MAPE of {overall_mape:.2f}% indicates {'excellent' if overall_mape < 5 else 'good' if overall_mape < 10 else 'moderate'} prediction accuracy.")
@@ -351,5 +369,13 @@ if st.button("🚀 Train and Predict", type="primary"):
         st.info("📊 Model shows decent predictive capability.")
     else:
         st.warning("⚠️ Model predictions should be used with caution due to lower R² score.")
+    
+    # Model-specific insights
+    if model_type == 'Random Forest':
+        st.write("**Random Forest Benefits:** Handles non-linear relationships and feature interactions well.")
+    elif model_type in ['Ridge Regression', 'Lasso Regression']:
+        st.write(f"**Regularization Benefits:** {model_type} helps prevent overfitting with alpha={alpha}.")
+    elif model_type == 'Linear Regression':
+        st.write("**Linear Model:** Assumes linear relationships between features and target.")
     
     st.write("**Disclaimer:** This prediction is based on historical data and technical indicators. Always conduct thorough research and consider multiple factors before making investment decisions.")
