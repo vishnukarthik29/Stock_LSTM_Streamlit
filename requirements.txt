@@ -6,3 +6,5 @@ matplotlib
 scikit-learn
 tensorflow
 keras
+alpha_vantage
+seaborn
