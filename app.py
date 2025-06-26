@@ -437,14 +437,28 @@ if st.button("🚀 Train and Predict", type="primary"):
     overall_r2 = np.mean([metrics_by_day[day]['R²'] for day in metrics_by_day.keys()])
     overall_rmse = np.mean([metrics_by_day[day]['RMSE'] for day in metrics_by_day.keys()])
     
-    col1, col2, col3, col4 = st.columns(4)
+    # Calculate overall Adjusted R²
+    adjusted_r2_values = []
+    for day in metrics_by_day:
+        r2 = metrics_by_day[day]['R²']
+        n = metrics_by_day[day]['n_samples']      # you must store this in your dictionary
+        p = metrics_by_day[day]['n_predictors']   # you must store this too
+        if n > p + 1:  # to avoid division by zero or negative
+            adj_r2 = 1 - (1 - r2) * ((n - 1) / (n - p - 1))
+            adjusted_r2_values.append(adj_r2)
+
+    overall_adjusted_r2 = np.mean(adjusted_r2_values)
+
+    col1, col2, col3, col4,col5 = st.columns(5)
     with col1:
         st.metric("Overall MAPE", f"{overall_mape:.2f}%")
     with col2:
         st.metric("Overall R² Score", f"{overall_r2:.4f}")
     with col3:
-        st.metric("Overall RMSE", f"{overall_rmse:.2f}")
+        st.metric("Overall Adjusted R² Score", f"{overall_adjusted_r2:.4f}")
     with col4:
+        st.metric("Overall RMSE", f"{overall_rmse:.2f}")
+    with col5:
         accuracy = max(0, 100 - overall_mape)
         st.metric("Prediction Accuracy", f"{accuracy:.1f}%")
     
