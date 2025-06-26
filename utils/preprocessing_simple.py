@@ -2,7 +2,7 @@ from alpha_vantage.timeseries import TimeSeries
 import pandas as pd
 import numpy as np
 
-api_key = "PDOA34QI37ZG6KH8"
+api_key = "70CILADGUDA5YE75"
 
 def load_data(symbol):
     """Simple data loading with basic technical indicators"""
