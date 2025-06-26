@@ -85,7 +85,7 @@ def get_model(model_type, **kwargs):
             random_state=42
         )
 
-def calculate_metrics(y_true, y_pred, n_samples=None, n_predictors=None):
+def calculate_metrics(y_true, y_pred):
     """Calculate comprehensive evaluation metrics"""
     mse = mean_squared_error(y_true, y_pred)
     mae = mean_absolute_error(y_true, y_pred)
@@ -95,21 +95,13 @@ def calculate_metrics(y_true, y_pred, n_samples=None, n_predictors=None):
     # Handle division by zero for MAPE
     mape = np.mean(np.abs((y_true - y_pred) / np.where(y_true != 0, y_true, 1e-8))) * 100
     
-    metrics = {
+    return {
         'MSE': mse,
         'MAE': mae,
         'RMSE': rmse,
         'R²': r2,
         'MAPE': mape
     }
-    
-    # Add n_samples and n_predictors if provided
-    if n_samples is not None:
-        metrics['n_samples'] = n_samples
-    if n_predictors is not None:
-        metrics['n_predictors'] = n_predictors
-    
-    return metrics
 
 if st.button("🚀 Train and Predict", type="primary"):
     with st.spinner("📊 Loading and preprocessing data..."):
@@ -380,16 +372,8 @@ if st.button("🚀 Train and Predict", type="primary"):
         
         # Calculate metrics for each prediction day
         metrics_by_day = {}
-        n_samples = len(y_actual)
-        n_predictors = X_train.shape[1]
-        
         for day in range(n_days):
-            day_metrics = calculate_metrics(
-                y_actual[:, day], 
-                y_pred[:, day],
-                n_samples=n_samples,
-                n_predictors=n_predictors
-            )
+            day_metrics = calculate_metrics(y_actual[:, day], y_pred[:, day])
             metrics_by_day[f'Day {day+1}'] = day_metrics
     
     # Visualize predictions
@@ -453,28 +437,16 @@ if st.button("🚀 Train and Predict", type="primary"):
     overall_r2 = np.mean([metrics_by_day[day]['R²'] for day in metrics_by_day.keys()])
     overall_rmse = np.mean([metrics_by_day[day]['RMSE'] for day in metrics_by_day.keys()])
     
-    # Calculate overall Adjusted R²
-    adjusted_r2_values = []
-    for day in metrics_by_day:
-        r2 = metrics_by_day[day]['R²']
-        n = metrics_by_day[day]['n_samples']
-        p = metrics_by_day[day]['n_predictors']
-        if n > p + 1:  # to avoid division by zero or negative
-            adj_r2 = 1 - (1 - r2) * ((n - 1) / (n - p - 1))
-            adjusted_r2_values.append(adj_r2)
     
-    overall_adjusted_r2 = np.mean(adjusted_r2_values) if adjusted_r2_values else 0
 
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("Overall MAPE", f"{overall_mape:.2f}%")
     with col2:
         st.metric("Overall R² Score", f"{overall_r2:.4f}")
     with col3:
-        st.metric("Overall Adjusted R² Score", f"{overall_adjusted_r2:.4f}")
-    with col4:
         st.metric("Overall RMSE", f"{overall_rmse:.2f}")
-    with col5:
+    with col4:
         accuracy = max(0, 100 - overall_mape)
         st.metric("Prediction Accuracy", f"{accuracy:.1f}%")
     
